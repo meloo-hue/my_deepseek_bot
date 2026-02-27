@@ -1,13 +1,10 @@
 import asyncio
 import sys
+import os  # 👈 ОБЯЗАТЕЛЬНО ДОБАВЬТЕ ЭТОТ ИМПОРТ!
+import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from google import genai  # Новая библиотека!
-import logging
-
-# Для Python 3.14+
-if sys.version_info >= (3, 14):
-    asyncio.set_event_loop(asyncio.new_event_loop())
+from google import genai
 
 # Настройка логирования
 logging.basicConfig(
@@ -16,14 +13,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Конфигурация ---
+# --- Читаем переменные окружения (БЕЗОПАСНО!) ---
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
+# Проверяем, что ключи найдены
+if not TELEGRAM_TOKEN:
+    raise ValueError("❌ Ошибка: Не найдена переменная окружения TELEGRAM_TOKEN!")
+if not GEMINI_API_KEY:
+    raise ValueError("❌ Ошибка: Не найдена переменная окружения GEMINI_API_KEY!")
 
-# Инициализируем клиента Gemini (новая библиотека!)
+logger.info("✅ Ключи успешно загружены из переменных окружения")
+
+# Инициализируем Gemini клиент
 client = genai.Client(api_key=GEMINI_API_KEY)
-
-# Выбираем модель (можно заменить на любую из вашего списка)
-MODEL_NAME = "gemma-3-27b-it"  # Быстрая и современная модель
+MODEL_NAME = "gemma-3-27b-it"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
