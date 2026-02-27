@@ -1,2 +1,8 @@
-python-telegram-bot==20.3 
-openai==1.12.0 
+python-telegram-bot==21.10
+google-genai==1.7.0
+httpx==0.28.1
+httpcore==1.0.7
+tenacity==9.0.0
+websockets==15.0.1
+h11==0.14.0
+certifi==2025.1.31
