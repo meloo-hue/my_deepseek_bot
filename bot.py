@@ -17,8 +17,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Конфигурация ---
-TELEGRAM_TOKEN = "8039807556:AAG2e-gHgdJ98W1MRf_-SPFGVVgUYwTQFJ8"
-GEMINI_API_KEY = "AIzaSyAsuRuME2x-CPllvs3iNG-aWY5jS0HRt6Q"
+
 
 # Инициализируем клиента Gemini (новая библиотека!)
 client = genai.Client(api_key=GEMINI_API_KEY)
