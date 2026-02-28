@@ -1,4 +1,3 @@
-python
 import asyncio
 import sys
 import os
@@ -34,94 +33,92 @@ client = AsyncOpenAI(
 MODEL_NAME = "deepseek-chat"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
+    """Обработчик команды /start - только для групп"""
     chat_type = update.effective_chat.type
-    bot_username = (await context.bot.get_me()).username
     
-    # В личных сообщениях объясняем, что бот только для групп
+    # Если это личный чат - просто игнорируем (даже не отвечаем)
     if chat_type == "private":
+        logger.info(f"🚫 Игнорируем /start в личке от {update.effective_user.id}")
+        return  # Молча выходим, НИЧЕГО не отправляем
+    
+    # Если это группа - приветствуем
+    if chat_type in ["group", "supergroup"]:
+        bot_username = (await context.bot.get_me()).username
         await update.message.reply_text(
-            f"❌ **Этот бот работает только в группах!**\n\n"
-            f"Чтобы использовать меня:\n"
-            f"1️⃣ Добавьте меня в группу\n"
-            f"2️⃣ Упомяните меня @{bot_username} с вашим вопросом\n\n"
-            f"Пример: @{bot_username} Какая сегодня погода?"
+            f"✅ Бот ШМЕЛЬ готов к работе в группе!\n"
+            f"Упомяните меня @{bot_username} чтобы задать вопрос."
+        )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик текстовых сообщений - ТОЛЬКО для групп"""
+    chat_type = update.effective_chat.type
+    
+    # ❌ ВАЖНО: сразу отсекаем личные сообщения
+    if chat_type == "private":
+        # Даже не логируем каждое сообщение, чтобы не засорять логи
+        # Можно закомментировать следующую строку, если хотите тишины
+        logger.debug(f"Личное сообщение от {update.effective_user.id} проигнорировано")
+        return  # Мгновенный выход, никакой обработки
+    
+    # ✅ Работаем только с группами
+    if chat_type not in ["group", "supergroup"]:
+        return  # На всякий случай, если есть другие типы чатов
+    
+    user_message = update.message.text
+    bot_username = (await context.bot.get_me()).username
+    chat_id = update.effective_chat.id
+    
+    # Проверяем упоминание бота
+    if f"@{bot_username}" not in user_message:
+        logger.debug(f"Группа {chat_id}: сообщение без упоминания")
+        return
+    
+    # Убираем упоминание из сообщения
+    user_message = user_message.replace(f"@{bot_username}", "").strip()
+    
+    # Если после удаления упоминания текст пустой
+    if not user_message:
+        await update.message.reply_text(
+            "❓ Напишите вопрос после упоминания",
+            reply_to_message_id=update.message.message_id
         )
         return
     
-    # В группах короткое приветствие
-    await update.message.reply_text(
-        f"✅ Бот ШМЕЛЬ готов к работе!\n"
-        f"Упомяните меня @{bot_username} чтобы задать вопрос."
+    logger.info(f"📤 Группа {chat_id}: запрос: {user_message[:50]}...")
+    
+    # Показываем статус "печатает"
+    await context.bot.send_chat_action(
+        chat_id=chat_id, 
+        action="typing"
     )
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик текстовых сообщений"""
-    chat_type = update.effective_chat.type
     
-    # ❌ ПОЛНОСТЬЮ ИГНОРИРУЕМ ЛИЧНЫЕ СООБЩЕНИЯ
-    if chat_type == "private":
-        # Просто логируем и ничего не отвечаем
-        logger.info(f"🚫 Заблокировано личное сообщение от {update.effective_user.id}")
-        return  # Молча выходим, бот ничего не отправляет
-    
-    # ✅ РАБОТАЕМ ТОЛЬКО В ГРУППАХ
-    if chat_type in ["group", "supergroup"]:
-        user_message = update.message.text
-        bot_username = (await context.bot.get_me()).username
-        chat_id = update.effective_chat.id
-        
-        # Проверяем упоминание бота
-        if f"@{bot_username}" not in user_message:
-            logger.info(f"Группа {chat_id}: сообщение без упоминания — игнорируем")
-            return
-        
-        # Убираем упоминание из сообщения
-        user_message = user_message.replace(f"@{bot_username}", "").strip()
-        
-        # Если после удаления упоминания текст пустой
-        if not user_message:
-            await update.message.reply_text(
-                "❓ Напишите вопрос после упоминания",
-                reply_to_message_id=update.message.message_id
-            )
-            return
-        
-        logger.info(f"📤 Группа {chat_id}: запрос: {user_message[:50]}...")
-        
-        # Показываем статус "печатает"
-        await context.bot.send_chat_action(
-            chat_id=chat_id, 
-            action="typing"
+    try:
+        # Отправляем запрос к DeepSeek
+        response = await client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": "Ты — полезный ассистент по имени Шмель. Отвечай кратко и по делу."},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.7,
+            max_tokens=2000,
         )
         
-        try:
-            # Отправляем запрос к DeepSeek
-            response = await client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": "Ты — полезный ассистент по имени Шмель. Отвечай кратко и по делу."},
-                    {"role": "user", "content": user_message},
-                ],
-                temperature=0.7,
-                max_tokens=2000,
-            )
-            
-            bot_reply = response.choices[0].message.content
-            logger.info(f"📥 Получен ответ от DeepSeek")
-            
-            # Отправляем ответ с цитированием
-            await update.message.reply_text(
-                bot_reply,
-                reply_to_message_id=update.message.message_id
-            )
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка: {e}")
-            await update.message.reply_text(
-                "😔 Извините, произошла ошибка.",
-                reply_to_message_id=update.message.message_id
-            )
+        bot_reply = response.choices[0].message.content
+        logger.info(f"📥 Группа {chat_id}: получен ответ")
+        
+        # Отправляем ответ с цитированием
+        await update.message.reply_text(
+            bot_reply,
+            reply_to_message_id=update.message.message_id
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка в группе {chat_id}: {e}")
+        await update.message.reply_text(
+            "😔 Извините, произошла ошибка.",
+            reply_to_message_id=update.message.message_id
+        )
 
 def main():
     """Запуск бота"""
@@ -132,7 +129,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     logger.info("🚀 Бот ШМЕЛЬ на базе DeepSeek запущен...")
-    logger.info("🔒 Режим: ТОЛЬКО ГРУППЫ (личные сообщения игнорируются)")
+    logger.info("🔒 РЕЖИМ: ТОЛЬКО ГРУППЫ (личные сообщения ПОЛНОСТЬЮ игнорируются)")
     
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
