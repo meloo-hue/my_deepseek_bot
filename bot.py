@@ -161,7 +161,6 @@ async def show_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ========== ОСНОВНОЙ ОБРАБОТЧИК СООБЩЕНИЙ ==========
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений с поддержкой группового контекста"""
     chat_type = update.effective_chat.type
@@ -184,22 +183,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     should_respond = False
     original_message = user_message  # Сохраняем оригинал для контекста
     
-    # Проверка 1: Упоминание бота
-    if f"@{bot_username}" in user_message:
+    # ВАЖНО: Сначала проверяем reply, потому что оно может быть даже без упоминания!
+    if update.message.reply_to_message:
+        reply_to_user = update.message.reply_to_message.from_user
+        logger.info(f"📨 Получен reply в чате {chat_id}")
+        logger.info(f"   - От кого: {user_name} (ID: {user_id})")
+        logger.info(f"   - Кому (оригинал): {reply_to_user.first_name} (ID: {reply_to_user.id})")
+        logger.info(f"   - Это бот? {reply_to_user.id == context.bot.id}")
+        
+        # Если отвечают на сообщение бота
+        if reply_to_user.id == context.bot.id:
+            should_respond = True
+            logger.info(f"🔄 Ответ на сообщение бота! Будем отвечать.")
+    
+    # Проверка 2: Упоминание бота (только если еще не решили отвечать)
+    if not should_respond and f"@{bot_username}" in user_message:
         should_respond = True
         user_message = user_message.replace(f"@{bot_username}", "").strip()
         logger.info(f"👥 Упоминание бота в группе {chat_id}")
     
-    # Проверка 2: Ответ на сообщение бота
-    elif (update.message.reply_to_message and 
-          update.message.reply_to_message.from_user.id == context.bot.id):
-        should_respond = True
-        logger.info(f"🔄 Ответ на сообщение бота в группе {chat_id}")
-        # При ответе НЕ удаляем текст, используем полное сообщение
-        # (упоминание не требуется)
-    
     # Если не нужно отвечать, сохраняем в контекст и выходим
     if not should_respond:
+        logger.info(f"💬 Сообщение без триггера, сохраняем в контекст")
         group_context.add_message(chat_id, user_id, user_name, original_message)
         return
     
@@ -239,7 +244,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_facts:
         system_content += f"\n\n{user_facts}"
     
-    logger.info(f"📤 Группа {chat_id}: запрос от {user_name}: {user_message[:50]}...")
+    # Для reply добавляем информацию в промпт
+    if update.message.reply_to_message and update.message.reply_to_message.from_user.id == context.bot.id:
+        original_bot_message = update.message.reply_to_message.text
+        system_content += f"\n\nПользователь отвечает на твое предыдущее сообщение: \"{original_bot_message}\""
+    
+    logger.info(f"📤 Группа {chat_id}: запрос от {user_name}: {(user_message or original_message)[:50]}...")
     
     try:
         # Отправляем запрос к DeepSeek
