@@ -128,7 +128,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• @{bot_username} какая погода в Москве?\n"
         f"• @{bot_username} сколько градусов в Лондоне?\n\n"
         f"**Как использовать:**\n"
-        f"Упомяните меня @{bot_username} с вопросом"
+        f"Упомяните меня @{bot_username} с вопросом\n\n"
+        f"💡 **Новое:** Теперь можно просто ответить на моё сообщение!"
     )
 
 async def show_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -179,50 +180,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name or f"User{user_id}"
     
-    # ========== ДИАГНОСТИКА ==========
-    logger.info(f"🔍 Получено сообщение в чате {chat_id}")
-    logger.info(f"   - Текст: {user_message[:50] if user_message else 'None'}")
-    logger.info(f"   - От: {user_name} (ID: {user_id})")
-    
-    # Проверяем, есть ли reply
-    if update.message.reply_to_message:
-        reply_to = update.message.reply_to_message
-        logger.info(f"   📌 Это ОТВЕТ (reply) на сообщение:")
-        logger.info(f"      - Текст оригинала: {reply_to.text[:50] if reply_to.text else 'None'}")
-        logger.info(f"      - Автор оригинала: {reply_to.from_user.first_name} (ID: {reply_to.from_user.id})")
-        logger.info(f"      - Это бот? {reply_to.from_user.id == context.bot.id}")
-    else:
-        logger.info(f"   ❌ Это НЕ ответ (обычное сообщение)")
-    
-    # Проверяем упоминание
-    if f"@{bot_username}" in user_message:
-        logger.info(f"   ✅ Есть упоминание бота")
-    else:
-        logger.info(f"   ❌ Нет упоминания бота")
-    # =================================
-    
-    # Проверяем, нужно ли отвечать
+    # ========== ПРОВЕРЯЕМ, НУЖНО ЛИ ОТВЕЧАТЬ ==========
     should_respond = False
     original_message = user_message
     
-    # Проверка 1: Ответ на сообщение бота (САМАЯ ВАЖНАЯ)
+    # ⭐ ПРОВЕРКА 1: Это ответ на сообщение бота? (САМАЯ ВАЖНАЯ)
     if update.message.reply_to_message:
-        if update.message.reply_to_message.from_user.id == context.bot.id:
+        reply_to_user = update.message.reply_to_message.from_user
+        logger.info(f"📨 Получен reply в чате {chat_id}")
+        logger.info(f"   - От кого: {user_name} (ID: {user_id})")
+        logger.info(f"   - Кому (оригинал): {reply_to_user.first_name} (ID: {reply_to_user.id})")
+        logger.info(f"   - Это бот? {reply_to_user.id == context.bot.id}")
+        
+        if reply_to_user.id == context.bot.id:
             should_respond = True
-            logger.info(f"🔄✅ РЕШЕНИЕ: Отвечаем, так как это ответ на сообщение бота")
-        else:
-            logger.info(f"🔄❌ РЕШЕНИЕ: Не отвечаем, ответ другому пользователю")
+            logger.info(f"🔄 Ответ на сообщение бота! Будем отвечать.")
     
-    # Проверка 2: Упоминание бота (только если еще не решили отвечать)
+    # ⭐ ПРОВЕРКА 2: Упоминание бота (только если еще не решили отвечать)
     if not should_respond and f"@{bot_username}" in user_message:
         should_respond = True
         user_message = user_message.replace(f"@{bot_username}", "").strip()
-        logger.info(f"👥✅ РЕШЕНИЕ: Отвечаем, так как есть упоминание бота")
+        logger.info(f"👥 Упоминание бота в группе {chat_id}")
     
-    # Если не нужно отвечать, сохраняем в контекст и выходим
+    # Всегда сохраняем в контекст (даже если не отвечаем)
+    group_context.add_message(chat_id, user_id, user_name, original_message)
+    logger.info(f"💬 Сообщение сохранено в контекст")
+    
+    # Если не нужно отвечать - выходим
     if not should_respond:
-        logger.info(f"💬 Сообщение без триггера, сохраняем в контекст")
-        group_context.add_message(chat_id, user_id, user_name, original_message)
+        logger.info(f"⏭️ Сообщение без триггера - пропускаем")
         return
     
     # Если это упоминание, но после удаления текст пустой
@@ -283,8 +269,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_reply = response.choices[0].message.content
         logger.info(f"📥 Группа {chat_id}: получен ответ")
         
-        # Сохраняем ответ бота в оба контекста
-        group_context.add_message(chat_id, user_id, user_name, original_message)
+        # Сохраняем ответ бота в контекст
         group_context.add_message(chat_id, context.bot.id, "Шмель", bot_reply, is_bot_response=True)
         memory.add_to_short_term(user_id, "assistant", bot_reply)
         
@@ -292,6 +277,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bot_reply,
             reply_to_message_id=update.message.message_id
         )
+        logger.info(f"✅ Ответ отправлен в группу {chat_id}")
         
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}")
@@ -320,6 +306,7 @@ def main():
     logger.info(f"🌤 Погода: {'✅ доступна' if WEATHER_API_KEY else '❌ не настроена'}")
     logger.info("🧠 Режим: с памятью + групповой контекст")
     logger.info("🔒 Только группы")
+    logger.info("💬 Реагирует на: @упоминания и ответы на сообщения бота")
     
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
