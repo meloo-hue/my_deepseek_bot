@@ -12,27 +12,44 @@ class TavilySearchEngine:
     def __init__(self):
         self.client = None
         self.monthly_queries = 0
-        self.max_monthly = 1000  # Бесплатный лимит
+        self.max_monthly = 1000
         self.last_reset = datetime.now()
         
-        # Список русскоязычных доменов для приоритизации
+        # Белый список русскоязычных доменов
         self.russian_domains = [
-            "ru", "рф", ".ru", ".рф",
-            "yandex.ru", "mail.ru", "rambler.ru",
-            "ria.ru", "tass.ru", "interfax.ru",
-            "kommersant.ru", "vedomosti.ru", "rbk.ru",
-            "gazeta.ru", "lenta.ru", "news.ru",
-            "mk.ru", "kp.ru", "aif.ru",
-            "fontanka.ru", "dp.ru", "spb.ru",
-            "habr.com/ru", "vc.ru", "tjournal.ru"
+            # Новостные агентства
+            "ria.ru", "tass.ru", "interfax.ru", "rbc.ru", "kommersant.ru",
+            "vedomosti.ru", "gazeta.ru", "lenta.ru", "news.ru", "mk.ru",
+            "kp.ru", "aif.ru", "fontanka.ru", "dp.ru", "spb.ru",
+            "echo.msk.ru", "svoboda.org", "currenttime.tv",
+            "meduza.io", "novayagazeta.eu", "istories.media",
+            "the-village.ru", "paperpaper.ru", "bumaga.ru",
+            
+            # Поисковики и порталы
+            "yandex.ru", "mail.ru", "rambler.ru", "ya.ru",
+            
+            # IT и технологии
+            "habr.com", "habr.ru", "vc.ru", "tjournal.ru", "dtf.ru",
+            "ixbt.com", "overclockers.ru", "3dnews.ru",
+            
+            # Спорт
+            "sports.ru", "championat.com", "sovsport.ru",
+            
+            # Региональные
+            "msk.ru", "spb.ru", "nn.ru", "eka.ru", "ufa.ru"
         ]
         
-        # Ключевые слова для определения русского языка
-        self.russian_keywords = [
-            "россия", "москва", "питер", "спб", "рф",
-            "путин", "медведев", "совет", "дума",
-            "кремль", "правительство", "министр",
-            "рубль", "доллар", "евро", "нефть", "газ"
+        # Слова для определения русского языка
+        self.russian_words = [
+            "что", "как", "так", "все", "это", "они", "мы", "вы", "ты",
+            "россия", "москва", "питер", "спб", "российской", "российский",
+            "президент", "путин", "правительство", "госдума", "совет",
+            "рубль", "доллар", "евро", "нефть", "газ", "бензин",
+            "новости", "события", "происшествия", "политика", "экономика",
+            "спорт", "культура", "технологии", "наука", "образование",
+            "сегодня", "вчера", "завтра", "сейчас", "после", "потом",
+            "год", "месяц", "день", "неделя", "часы", "минуты",
+            "человек", "люди", "город", "страна", "мир", "регион"
         ]
     
     def initialize(self, api_key: str):
@@ -52,29 +69,58 @@ class TavilySearchEngine:
         return True
     
     def _is_russian_result(self, result: Dict) -> bool:
-        """Проверяет, является ли результат русскоязычным"""
-        title = result.get('title', '').lower()
-        content = result.get('content', '').lower()
+        """Улучшенная проверка русскоязычности результата"""
+        title = result.get('title', '')
+        content = result.get('content', '')
         url = result.get('url', '').lower()
         
-        # Проверка по домену
+        # 1. Проверка по домену (самый надежный способ)
         for domain in self.russian_domains:
             if domain in url:
+                logger.debug(f"✅ Русский домен: {domain} в {url}")
                 return True
         
-        # Проверка по ключевым словам
-        text = title + " " + content
-        for keyword in self.russian_keywords:
-            if keyword in text:
-                return True
+        # 2. Проверка по наличию русских букв в тексте
+        text = (title + " " + content)[:1000]  # Первые 1000 символов
         
-        # Проверка по наличию русских букв
-        russian_chars = sum(1 for char in title + content if 'а' <= char <= 'я' or 'А' <= char <= 'Я')
-        total_chars = len(title + content)
-        if total_chars > 0 and russian_chars / total_chars > 0.3:  # >30% русских букв
-            return True
+        # Считаем русские и английские буквы
+        russian_count = 0
+        english_count = 0
+        total_chars = 0
         
-        return False
+        for char in text:
+            if 'а' <= char.lower() <= 'я' or char.lower() in ['ё', 'ъ', 'ы', 'э']:
+                russian_count += 1
+            elif 'a' <= char.lower() <= 'z':
+                english_count += 1
+            total_chars += 1
+        
+        # Если текст слишком короткий, не можем определить
+        if total_chars < 20:
+            return False
+        
+        # Вычисляем процент русских букв
+        russian_percent = russian_count / (russian_count + english_count + 1) * 100
+        
+        # 3. Проверка по словам
+        text_lower = text.lower()
+        russian_word_count = 0
+        for word in self.russian_words:
+            if word in text_lower:
+                russian_word_count += 1
+        
+        # Принимаем решение
+        is_russian = (
+            russian_percent > 50 or  # Больше 50% русских букв
+            russian_word_count > 3    # Или найдено больше 3 русских слов
+        )
+        
+        if is_russian:
+            logger.debug(f"✅ Русский текст: {russian_percent:.1f}% русских букв, {russian_word_count} русских слов")
+        else:
+            logger.debug(f"❌ Не русский текст: {russian_percent:.1f}% русских букв, {russian_word_count} русских слов")
+        
+        return is_russian
     
     async def search(self, query: str, max_results: int = 5, topic: str = "general") -> Dict:
         """
@@ -89,12 +135,14 @@ class TavilySearchEngine:
         try:
             logger.info(f"🔍 Tavily поиск: {query[:100]}...")
             
-            # Запрашиваем больше результатов для фильтрации
+            # Добавляем в запрос указание на русский язык
+            enhanced_query = f"{query} -английский -english"
+            
             response = self.client.search(
-                query=query,
+                query=enhanced_query,
                 search_depth="advanced",
                 topic=topic,
-                max_results=max_results * 3,  # Запрашиваем больше для фильтрации
+                max_results=max_results * 5,  # Запрашиваем больше для фильтрации
                 include_answer=True,
                 include_raw_content=False
             )
@@ -102,28 +150,35 @@ class TavilySearchEngine:
             self.monthly_queries += 1
             remaining = self.max_monthly - self.monthly_queries
             
-            # Фильтруем результаты, оставляя только русскоязычные
+            # Фильтруем результаты
             all_results = response.get('results', [])
             russian_results = []
+            other_results = []
             
             for result in all_results:
                 if self._is_russian_result(result):
                     russian_results.append(result)
-                    if len(russian_results) >= max_results:
-                        break
+                else:
+                    other_results.append(result)
             
-            # Если не нашли русских результатов, используем первые max_results
-            if not russian_results:
-                russian_results = all_results[:max_results]
-                logger.warning(f"⚠️ Русскоязычных результатов не найдено, использую первые {max_results}")
+            # Берем русские результаты, если есть, иначе английские
+            if len(russian_results) >= max_results:
+                final_results = russian_results[:max_results]
+                used_russian = True
+            elif russian_results:
+                final_results = russian_results + other_results[:max_results - len(russian_results)]
+                used_russian = True
+            else:
+                final_results = other_results[:max_results]
+                used_russian = False
             
-            # Обновляем результаты в ответе
-            response['results'] = russian_results
+            response['results'] = final_results
             response['total_found'] = len(all_results)
             response['russian_found'] = len(russian_results)
+            response['used_russian'] = used_russian
             
-            logger.info(f"✅ Найдено {len(russian_results)} русскоязычных результатов из {len(all_results)}. "
-                       f"Осталось кредитов: {remaining}")
+            logger.info(f"✅ Найдено {len(russian_results)} русскоязычных из {len(all_results)}. "
+                       f"Использовано: {len(final_results)}. Осталось кредитов: {remaining}")
             
             return response
             
@@ -144,12 +199,14 @@ class TavilySearchEngine:
         try:
             logger.info(f"📰 Tavily поиск новостей: {query[:100]}...")
             
-            # Запрашиваем больше результатов для фильтрации
+            # Добавляем в запрос указание на русский язык
+            enhanced_query = f"{query} -английский -english -uk -us -gb"
+            
             response = self.client.search(
-                query=query,
+                query=enhanced_query,
                 search_depth="advanced",
                 topic="news",
-                max_results=max_results * 3,  # Запрашиваем больше для фильтрации
+                max_results=max_results * 5,
                 include_answer=False,
                 include_raw_content=False,
                 days=days
@@ -161,21 +218,29 @@ class TavilySearchEngine:
             # Фильтруем результаты
             all_results = response.get('results', [])
             russian_results = []
+            other_results = []
             
             for result in all_results:
                 if self._is_russian_result(result):
                     russian_results.append(result)
-                    if len(russian_results) >= max_results:
-                        break
+                else:
+                    other_results.append(result)
             
-            # Если не нашли русских результатов, используем первые max_results
-            if not russian_results:
-                russian_results = all_results[:max_results]
-                logger.warning(f"⚠️ Русскоязычных новостей не найдено, использую первые {max_results}")
+            # Берем русские результаты, если есть
+            if len(russian_results) >= max_results:
+                final_results = russian_results[:max_results]
+                used_russian = True
+            elif russian_results:
+                final_results = russian_results + other_results[:max_results - len(russian_results)]
+                used_russian = True
+            else:
+                final_results = other_results[:max_results]
+                used_russian = False
             
-            response['results'] = russian_results
+            response['results'] = final_results
             response['total_found'] = len(all_results)
             response['russian_found'] = len(russian_results)
+            response['used_russian'] = used_russian
             
             logger.info(f"✅ Найдено {len(russian_results)} русскоязычных новостей из {len(all_results)}. "
                        f"Осталось кредитов: {remaining}")
@@ -195,6 +260,7 @@ class TavilySearchEngine:
         answer = response.get('answer', '')
         results = response.get('results', [])
         russian_found = response.get('russian_found', 0)
+        used_russian = response.get('used_russian', False)
         
         if not results and not answer:
             return f"🔍 По запросу '{query}' ничего не найдено."
@@ -202,19 +268,21 @@ class TavilySearchEngine:
         message = f"🔍 **Результаты поиска по запросу:**\n"
         message += f"_{query}_\n\n"
         
-        # Tavily может дать готовый ответ
-        if answer:
+        if not used_russian:
+            message += "⚠️ **Внимание:** Не найдено русскоязычных источников, показываю английские.\n\n"
+        
+        if answer and used_russian:
             message += f"📌 **Краткий ответ:**\n{answer}\n\n"
         
         if results:
-            message += f"**Найденные источники ({russian_found} русскоязычных):**\n\n"
             for i, result in enumerate(results, 1):
                 title = result.get('title', 'Без названия')
                 content = result.get('content', '')
                 url = result.get('url', '')
                 
-                # Добавляем флаг русскоязычности
-                flag = "🇷🇺 " if self._is_russian_result(result) else "🌐 "
+                # Проверяем язык этого конкретного результата
+                is_russian = self._is_russian_result(result)
+                flag = "🇷🇺 " if is_russian else "🇬🇧 "
                 
                 message += f"**{i}. {flag}{title}**\n"
                 if content:
@@ -234,13 +302,18 @@ class TavilySearchEngine:
         query = response.get('query', '')
         results = response.get('results', [])
         russian_found = response.get('russian_found', 0)
+        used_russian = response.get('used_russian', False)
         
         if not results:
             return f"📰 По запросу '{query}' новостей не найдено."
         
         message = f"📰 **Последние новости по запросу:**\n"
         message += f"_{query}_\n\n"
-        message += f"**Найдено {russian_found} русскоязычных новостей:**\n\n"
+        
+        if not used_russian:
+            message += "⚠️ **Внимание:** Не найдено русскоязычных новостей, показываю английские.\n\n"
+        else:
+            message += f"**Найдено {russian_found} русскоязычных новостей:**\n\n"
         
         for i, result in enumerate(results, 1):
             title = result.get('title', 'Без названия')
@@ -248,8 +321,9 @@ class TavilySearchEngine:
             url = result.get('url', '')
             published = result.get('published_date', '')
             
-            # Добавляем флаг русскоязычности
-            flag = "🇷🇺 " if self._is_russian_result(result) else "🌐 "
+            # Проверяем язык этого конкретного результата
+            is_russian = self._is_russian_result(result)
+            flag = "🇷🇺 " if is_russian else "🇬🇧 "
             
             message += f"**{i}. {flag}{title}**\n"
             if content:
