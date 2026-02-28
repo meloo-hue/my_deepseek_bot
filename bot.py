@@ -179,28 +179,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name or f"User{user_id}"
     
+    # ========== ДИАГНОСТИКА ==========
+    logger.info(f"🔍 Получено сообщение в чате {chat_id}")
+    logger.info(f"   - Текст: {user_message[:50] if user_message else 'None'}")
+    logger.info(f"   - От: {user_name} (ID: {user_id})")
+    
+    # Проверяем, есть ли reply
+    if update.message.reply_to_message:
+        reply_to = update.message.reply_to_message
+        logger.info(f"   📌 Это ОТВЕТ (reply) на сообщение:")
+        logger.info(f"      - Текст оригинала: {reply_to.text[:50] if reply_to.text else 'None'}")
+        logger.info(f"      - Автор оригинала: {reply_to.from_user.first_name} (ID: {reply_to.from_user.id})")
+        logger.info(f"      - Это бот? {reply_to.from_user.id == context.bot.id}")
+    else:
+        logger.info(f"   ❌ Это НЕ ответ (обычное сообщение)")
+    
+    # Проверяем упоминание
+    if f"@{bot_username}" in user_message:
+        logger.info(f"   ✅ Есть упоминание бота")
+    else:
+        logger.info(f"   ❌ Нет упоминания бота")
+    # =================================
+    
     # Проверяем, нужно ли отвечать
     should_respond = False
-    original_message = user_message  # Сохраняем оригинал для контекста
+    original_message = user_message
     
-    # ВАЖНО: Сначала проверяем reply, потому что оно может быть даже без упоминания!
+    # Проверка 1: Ответ на сообщение бота (САМАЯ ВАЖНАЯ)
     if update.message.reply_to_message:
-        reply_to_user = update.message.reply_to_message.from_user
-        logger.info(f"📨 Получен reply в чате {chat_id}")
-        logger.info(f"   - От кого: {user_name} (ID: {user_id})")
-        logger.info(f"   - Кому (оригинал): {reply_to_user.first_name} (ID: {reply_to_user.id})")
-        logger.info(f"   - Это бот? {reply_to_user.id == context.bot.id}")
-        
-        # Если отвечают на сообщение бота
-        if reply_to_user.id == context.bot.id:
+        if update.message.reply_to_message.from_user.id == context.bot.id:
             should_respond = True
-            logger.info(f"🔄 Ответ на сообщение бота! Будем отвечать.")
+            logger.info(f"🔄✅ РЕШЕНИЕ: Отвечаем, так как это ответ на сообщение бота")
+        else:
+            logger.info(f"🔄❌ РЕШЕНИЕ: Не отвечаем, ответ другому пользователю")
     
     # Проверка 2: Упоминание бота (только если еще не решили отвечать)
     if not should_respond and f"@{bot_username}" in user_message:
         should_respond = True
         user_message = user_message.replace(f"@{bot_username}", "").strip()
-        logger.info(f"👥 Упоминание бота в группе {chat_id}")
+        logger.info(f"👥✅ РЕШЕНИЕ: Отвечаем, так как есть упоминание бота")
     
     # Если не нужно отвечать, сохраняем в контекст и выходим
     if not should_respond:
