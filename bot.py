@@ -9,6 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from openai import AsyncOpenAI
 from memory import BotMemory
 from group_context import group_context
+from tavily_search import tavily_search  # Поисковый движок
 
 # Для Python 3.14+
 if sys.version_info >= (3, 14):
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
 
 if not TELEGRAM_TOKEN or not DEEPSEEK_API_KEY:
     raise ValueError("❌ Ошибка: Не найдены TELEGRAM_TOKEN или DEEPSEEK_API_KEY")
@@ -39,6 +41,11 @@ MODEL_NAME = "deepseek-chat"
 
 # Память
 memory = BotMemory()
+
+# Инициализация Tavily (если есть ключ)
+if TAVILY_API_KEY:
+    tavily_search.initialize(TAVILY_API_KEY)
+    logger.info("🔍 Tavily поиск инициализирован")
 
 # ========== ФУНКЦИЯ ПОГОДЫ ==========
 
@@ -107,7 +114,148 @@ async def init_memory():
     await group_context.init_db()
     logger.info("🧠 Память и групповой контекст инициализированы")
 
-# ========== ОБРАБОТЧИКИ КОМАНД ==========
+# ========== КОМАНДА HELP ==========
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает все доступные команды бота"""
+    chat_type = update.effective_chat.type
+    if chat_type == "private":
+        return
+    
+    bot_username = (await context.bot.get_me()).username
+    weather_status = "✅" if WEATHER_API_KEY else "❌"
+    search_status = "✅" if TAVILY_API_KEY else "❌"
+    
+    help_text = (
+        f"🤖 **ШМЕЛЬ — список команд**\n\n"
+        
+        f"**📋 Основные команды:**\n"
+        f"• `/start` - приветствие и информация о боте\n"
+        f"• `/help` - показать это меню\n"
+        f"• `/context` - показать текущий контекст чата (для отладки)\n\n"
+        
+        f"**🔍 Поиск информации** {search_status}:\n"
+        f"• `/search [запрос]` - поиск в интернете\n"
+        f"• `/news [тема]` - последние новости по теме\n"
+        f"• `/limits` - остаток бесплатных запросов Tavily\n\n"
+        
+        f"**🌤 Погода** {weather_status}:\n"
+        f"• @{bot_username} какая погода в [город]?\n"
+        f"• @{bot_username} сколько градусов в [город]?\n\n"
+        
+        f"**💬 Как общаться:**\n"
+        f"• Упомяните меня `@{bot_username}` с вопросом\n"
+        f"• Ответьте (reply) на моё сообщение\n"
+        f"• Я помню историю наших разговоров 🧠\n"
+        f"• Понимаю контекст всего чата\n\n"
+        
+        f"**📊 Статус функций:**\n"
+        f"• DeepSeek: ✅ всегда доступен\n"
+        f"• Память: ✅ работает\n"
+        f"• Поиск: {search_status}\n"
+        f"• Погода: {weather_status}\n\n"
+        
+        f"_Я работаю только в группах, личные сообщения игнорирую_"
+    )
+    
+    await update.message.reply_text(
+        help_text,
+        reply_to_message_id=update.message.message_id
+    )
+
+# ========== КОМАНДЫ ПОИСКА ==========
+
+async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Поиск информации через Tavily"""
+    chat_type = update.effective_chat.type
+    if chat_type == "private":
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "❓ Укажите запрос для поиска.\n"
+            "Пример: `/search последние новости технологий`\n"
+            "Используйте `/help` для списка всех команд.",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+    
+    if not TAVILY_API_KEY:
+        await update.message.reply_text(
+            "😔 Поиск временно недоступен (API ключ не настроен).",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+    
+    query = " ".join(context.args)
+    
+    # Показываем статус "печатает"
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id,
+        action="typing"
+    )
+    
+    # Выполняем поиск
+    response = await tavily_search.search(query)
+    result = tavily_search.format_search_results(response)
+    
+    await update.message.reply_text(
+        result,
+        reply_to_message_id=update.message.message_id,
+        disable_web_page_preview=True
+    )
+
+async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Поиск новостей через Tavily"""
+    chat_type = update.effective_chat.type
+    if chat_type == "private":
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "❓ Укажите запрос для поиска новостей.\n"
+            "Пример: `/news искусственный интеллект`\n"
+            "Используйте `/help` для списка всех команд.",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+    
+    if not TAVILY_API_KEY:
+        await update.message.reply_text(
+            "😔 Поиск новостей временно недоступен.",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+    
+    query = " ".join(context.args)
+    
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id,
+        action="typing"
+    )
+    
+    response = await tavily_search.search_news(query)
+    result = tavily_search.format_news_results(response)
+    
+    await update.message.reply_text(
+        result,
+        reply_to_message_id=update.message.message_id,
+        disable_web_page_preview=True
+    )
+
+async def limits(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает остаток лимитов Tavily"""
+    chat_type = update.effective_chat.type
+    if chat_type == "private":
+        return
+    
+    status = tavily_search.get_limits_status()
+    await update.message.reply_text(
+        status,
+        reply_to_message_id=update.message.message_id
+    )
+
+# ========== ОБРАБОТЧИК КОМАНДЫ START ==========
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -117,19 +265,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     bot_username = (await context.bot.get_me()).username
     weather_status = "✅ доступна" if WEATHER_API_KEY else "❌ не настроена"
+    search_status = "✅ доступен" if TAVILY_API_KEY else "❌ не настроен"
     
     await update.message.reply_text(
         f"🚀 Привет! Я бот ШМЕЛЬ.\n\n"
         f"**Что я умею:**\n"
-        f"• Отвечаю на вопросы (DeepSeek)\n"
-        f"• Запоминаю наши разговоры 🧠\n"
-        f"• Показываю погоду {weather_status}\n\n"
-        f"**Как спросить погоду:**\n"
-        f"• @{bot_username} какая погода в Москве?\n"
-        f"• @{bot_username} сколько градусов в Лондоне?\n\n"
-        f"**Как использовать:**\n"
-        f"Упомяните меня @{bot_username} с вопросом\n\n"
-        f"💡 **Новое:** Теперь можно просто ответить на моё сообщение!"
+        f"• Отвечаю на вопросы (DeepSeek) 🧠\n"
+        f"• Запоминаю наши разговоры\n"
+        f"• Ищу информацию в интернете 🔍 {search_status}\n"
+        f"• Показываю погоду {weather_status}\n"
+        f"• Показываю последние новости 📰\n\n"
+        f"**Основные команды:**\n"
+        f"• `/help` - список всех команд\n"
+        f"• `/search запрос` - поиск в интернете\n"
+        f"• `/news тема` - последние новости\n"
+        f"• `/limits` - остаток бесплатных запросов\n\n"
+        f"**Как общаться:**\n"
+        f"• Упомяните меня @{bot_username} с вопросом\n"
+        f"• Или просто ответьте на моё сообщение!\n\n"
+        f"_Я работаю только в группах_"
     )
 
 async def show_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -297,16 +451,24 @@ def main():
     """Запуск бота"""
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     
-    # Регистрируем обработчики
+    # Регистрируем обработчики команд
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))  # 👈 Новая команда help
     app.add_handler(CommandHandler("context", show_context))
+    app.add_handler(CommandHandler("search", search))
+    app.add_handler(CommandHandler("news", news))
+    app.add_handler(CommandHandler("limits", limits))
+    
+    # Регистрируем обработчик текстовых сообщений
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     logger.info("🚀 Бот ШМЕЛЬ на базе DeepSeek запущен...")
     logger.info(f"🌤 Погода: {'✅ доступна' if WEATHER_API_KEY else '❌ не настроена'}")
+    logger.info(f"🔍 Tavily поиск: {'✅ доступен' if TAVILY_API_KEY else '❌ не настроен'}")
     logger.info("🧠 Режим: с памятью + групповой контекст")
     logger.info("🔒 Только группы")
     logger.info("💬 Реагирует на: @упоминания и ответы на сообщения бота")
+    logger.info("📋 Команда /help добавлена")
     
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
