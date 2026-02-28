@@ -5,3 +5,4 @@ httpcore==1.0.5
 certifi==2024.12.14
 h11==0.14.0
 aiosqlite==0.20.0
+aiohttp==3.9.5
