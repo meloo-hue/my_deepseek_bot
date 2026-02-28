@@ -180,16 +180,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name or f"User{user_id}"
     
-    # Проверяем упоминание бота
-    if f"@{bot_username}" not in user_message:
-        # Даже если бота не упомянули, сохраняем сообщение в общий контекст
-        group_context.add_message(chat_id, user_id, user_name, user_message)
+    # Проверяем, нужно ли отвечать
+    should_respond = False
+    original_message = user_message  # Сохраняем оригинал для контекста
+    
+    # Проверка 1: Упоминание бота
+    if f"@{bot_username}" in user_message:
+        should_respond = True
+        user_message = user_message.replace(f"@{bot_username}", "").strip()
+        logger.info(f"👥 Упоминание бота в группе {chat_id}")
+    
+    # Проверка 2: Ответ на сообщение бота
+    elif (update.message.reply_to_message and 
+          update.message.reply_to_message.from_user.id == context.bot.id):
+        should_respond = True
+        logger.info(f"🔄 Ответ на сообщение бота в группе {chat_id}")
+        # При ответе НЕ удаляем текст, используем полное сообщение
+        # (упоминание не требуется)
+    
+    # Если не нужно отвечать, сохраняем в контекст и выходим
+    if not should_respond:
+        group_context.add_message(chat_id, user_id, user_name, original_message)
         return
     
-    # Убираем упоминание
-    user_message = user_message.replace(f"@{bot_username}", "").strip()
-    
-    if not user_message:
+    # Если это упоминание, но после удаления текст пустой
+    if not user_message and f"@{bot_username}" in original_message:
         await update.message.reply_text(
             "❓ Напишите вопрос после упоминания",
             reply_to_message_id=update.message.message_id
@@ -203,11 +218,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     # Извлекаем факты из сообщения
-    await memory.extract_facts_from_message(user_id, user_message)
+    await memory.extract_facts_from_message(user_id, original_message)
     
     # Получаем контекст из группы
     context_data = group_context.get_combined_context(
-        chat_id, user_id, user_name, user_message
+        chat_id, user_id, user_name, original_message
     )
     
     # Получаем личные факты пользователя
@@ -232,7 +247,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": system_content},
-                {"role": "user", "content": user_message},
+                {"role": "user", "content": user_message or original_message},
             ],
             temperature=0.7,
             max_tokens=2000,
@@ -242,7 +257,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"📥 Группа {chat_id}: получен ответ")
         
         # Сохраняем ответ бота в оба контекста
-        group_context.add_message(chat_id, user_id, user_name, user_message)
+        group_context.add_message(chat_id, user_id, user_name, original_message)
         group_context.add_message(chat_id, context.bot.id, "Шмель", bot_reply, is_bot_response=True)
         memory.add_to_short_term(user_id, "assistant", bot_reply)
         
