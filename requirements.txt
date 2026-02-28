@@ -7,3 +7,5 @@ h11==0.14.0
 aiosqlite==0.20.0
 aiohttp==3.9.5
 tavily-python==0.7.21
+yandex-search-api==0.1.8
+feedparser==6.0.10
