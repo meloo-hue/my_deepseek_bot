@@ -12,7 +12,7 @@ class TavilySearchEngine:
     def __init__(self):
         self.client = None
         self.monthly_queries = 0
-        self.max_monthly = 1000  # Бесплатный лимит [citation:3]
+        self.max_monthly = 1000  # Бесплатный лимит
         self.last_reset = datetime.now()
     
     def initialize(self, api_key: str):
@@ -22,7 +22,6 @@ class TavilySearchEngine:
     
     def _check_limits(self) -> bool:
         """Проверка месячного лимита"""
-        # Сброс счетчика в начале месяца
         if datetime.now().month != self.last_reset.month:
             self.monthly_queries = 0
             self.last_reset = datetime.now()
@@ -37,9 +36,9 @@ class TavilySearchEngine:
         Выполняет поиск через Tavily
         
         Args:
-            query: Поисковый запрос
-            max_results: Максимальное количество результатов (1-20) [citation:5]
-            topic: "general" (общий) или "news" (новости) [citation:5]
+            query: Поисковый запрос (можно на русском)
+            max_results: Максимальное количество результатов (1-20)
+            topic: "general" (общий) или "news" (новости)
         
         Returns:
             Dict с результатами поиска
@@ -53,20 +52,20 @@ class TavilySearchEngine:
         try:
             logger.info(f"🔍 Tavily поиск: {query[:100]}...")
             
-            # Параметры поиска [citation:2][citation:5]
+            # Параметры поиска с поддержкой русского языка
             response = self.client.search(
                 query=query,
-                search_depth="advanced",  # "basic" или "advanced" [citation:5]
+                search_depth="advanced",
                 topic=topic,
                 max_results=max_results,
-                include_answer=True,      # Включает готовый ответ на вопрос [citation:5]
-                include_raw_content=False # Не включаем сырой HTML для экономии
+                include_answer=True,
+                include_raw_content=False,
+                language="ru"  # 👈 Указываем русский язык
             )
             
             self.monthly_queries += 1
             remaining = self.max_monthly - self.monthly_queries
             
-            # Считаем стоимость (advanced = 2 кредита) [citation:3]
             cost = 2 if response.get('search_depth') == 'advanced' else 1
             logger.info(f"✅ Найдено {len(response.get('results', []))} результатов. "
                        f"Осталось кредитов: {remaining}")
@@ -79,19 +78,45 @@ class TavilySearchEngine:
     
     async def search_news(self, query: str, days: int = 7, max_results: int = 5) -> Dict:
         """
-        Поиск новостей через Tavily
+        Поиск новостей через Tavily с поддержкой русского языка
         
         Args:
-            query: Поисковый запрос
-            days: За сколько дней искать (до 30) [citation:5]
+            query: Поисковый запрос (можно на русском)
+            days: За сколько дней искать (до 30)
             max_results: Максимум результатов
         """
-        # Для новостей используем параметр freshness [citation:5]
-        return await self.search(
-            query=query,
-            max_results=max_results,
-            topic="news"
-        )
+        if not self.client:
+            return {"error": "Tavily клиент не инициализирован"}
+        
+        if not self._check_limits():
+            return {"error": "Месячный лимит запросов исчерпан"}
+        
+        try:
+            logger.info(f"📰 Tavily поиск новостей: {query[:100]}...")
+            
+            # Для новостей используем параметры с русским языком
+            response = self.client.search(
+                query=query,
+                search_depth="advanced",
+                topic="news",
+                max_results=max_results,
+                include_answer=False,  # Для новостей ответ не нужен
+                include_raw_content=False,
+                days=days,
+                language="ru"  # 👈 Указываем русский язык
+            )
+            
+            self.monthly_queries += 1
+            remaining = self.max_monthly - self.monthly_queries
+            
+            logger.info(f"✅ Найдено {len(response.get('results', []))} новостей. "
+                       f"Осталось кредитов: {remaining}")
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка Tavily поиска новостей: {e}")
+            return {"error": str(e)}
     
     def format_search_results(self, response: Dict) -> str:
         """Форматирует результаты поиска для отправки в чат"""
@@ -108,7 +133,7 @@ class TavilySearchEngine:
         message = f"🔍 **Результаты поиска по запросу:**\n"
         message += f"_{query}_\n\n"
         
-        # Tavily может дать готовый ответ [citation:5]
+        # Tavily может дать готовый ответ
         if answer:
             message += f"📌 **Краткий ответ:**\n{answer}\n\n"
         
@@ -121,7 +146,6 @@ class TavilySearchEngine:
                 
                 message += f"**{i}. {title}**\n"
                 if content:
-                    # Обрезаем слишком длинный контент
                     content = content[:200] + "..." if len(content) > 200 else content
                     message += f"{content}\n"
                 if url:
@@ -131,7 +155,7 @@ class TavilySearchEngine:
         return message.strip()
     
     def format_news_results(self, response: Dict) -> str:
-        """Форматирует новости для отправки в чат"""
+        """Форматирует новости для отправки в чат (на русском)"""
         if "error" in response:
             return f"❌ {response['error']}"
         
@@ -154,7 +178,13 @@ class TavilySearchEngine:
             if content:
                 message += f"{content[:150]}...\n"
             if published:
-                message += f"📅 {published[:10]}\n"
+                # Преобразуем дату в русский формат если нужно
+                try:
+                    pub_date = datetime.fromisoformat(published.replace('Z', '+00:00'))
+                    published = pub_date.strftime("%d.%m.%Y %H:%M")
+                except:
+                    published = published[:10]
+                message += f"📅 {published}\n"
             if url:
                 message += f"🔗 [Читать]({url})\n"
             message += "\n"
@@ -162,7 +192,7 @@ class TavilySearchEngine:
         return message.strip()
     
     def get_limits_status(self) -> str:
-        """Возвращает статус использования лимитов"""
+        """Возвращает статус использования лимитов (на русском)"""
         remaining = self.max_monthly - self.monthly_queries
         percent = (self.monthly_queries / self.max_monthly) * 100
         return (f"📊 **Tavily API лимиты:**\n"
